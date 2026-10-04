@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inventario de cervezas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<style>
+:root{--bg:#faf6ee;--card:#fff;--tx:#2a1c0c;--mu:#7a6a55;--ac:#b5701a;--bd:#e6dccb;--ok:#2e7d32;--bad:#c62828;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1610;--card:#2a2118;--tx:#f3e9d8;--mu:#b5a58f;--ac:#e0a040;--bd:#41362a;--ok:#7bc47f;--bad:#ef7b7b}}
+:root[data-theme="dark"]{--bg:#1c1610;--card:#2a2118;--tx:#f3e9d8;--mu:#b5a58f;--ac:#e0a040;--bd:#41362a;--ok:#7bc47f;--bad:#ef7b7b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,Arial,sans-serif}
+header{padding:14px 14px 4px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+h1{font-size:19px;margin:0}nav{display:flex;gap:6px;overflow-x:auto;padding:8px 14px}
+nav button{white-space:nowrap;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 12px;border-radius:20px;font:inherit}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+main{padding:6px 14px 40px;max-width:900px;margin:auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin:10px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.k{font-size:12px;color:var(--mu)}.v{font-size:19px;font-weight:700}
+label{display:block;font-size:12px;color:var(--mu)}input,select{width:100%;padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.f{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;align-items:end}
+button.p{background:var(--ac);color:#fff;border:0;padding:10px 14px;border-radius:8px;font:inherit;font-weight:600}
+button.s{background:none;border:1px solid var(--bd);color:var(--tx);padding:6px 10px;border-radius:8px;font:inherit}
+.t{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:7px 8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}th{color:var(--mu);font-weight:600}
+.pedir{color:var(--bad);font-weight:700}.okc{color:var(--ok);font-weight:700}.msg{padding:10px;border-radius:8px;background:var(--card);border:1px solid var(--bad);margin:10px 14px}
+h2{font-size:15px;margin:0 0 8px}
+</style></head><body>
+<header><h1>🍺 Inventario de cervezas</h1><button class="s" id="exp">⬇ Descargar PDF</button></header>
+<nav id="nav"></nav><div id="warn"></div><main id="app"></main>
+<script>
+const TABS=["Resumen","Productos","Entradas","Ventas","Salidas","Cuentas"];let tab="Resumen",P={},M={},lastB="";const KEY="inventario_cervezas_v1";
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const $$=n=>"$"+Math.round(n||0).toLocaleString("es-CO"),hoy=()=>new Date().toISOString().slice(0,10);
+const mv=t=>Object.values(M).filter(m=>m.tipo===t).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||"")||b.id.localeCompare(a.id));
+function stock(c){let s=0;for(const m of Object.values(M)){if(m.codigo!==c)continue;if(m.tipo==="entrada")s+=m.und;else if(m.tipo==="venta"||m.tipo==="salida")s-=m.und}return s}
+function cuentas(){const c={};for(const m of Object.values(M)){if(m.tipo==="venta"&&m.pago==="Fiado"&&m.cliente){const x=c[m.cliente]??={fiado:0,ab:0};x.fiado+=m.und*m.valor;x.ab+=m.abono||0}
+ if(m.tipo==="abono"){const x=c[m.cliente]??={fiado:0,ab:0};x.ab+=m.valor}}return c}
+function nav(){$("#nav").innerHTML=TABS.map(t=>`<button class="${t===tab?"on":""}" onclick="tab='${t}';draw()">${t}</button>`).join("")}
+function opts(){return Object.values(P).sort((a,b)=>a.codigo.localeCompare(b.codigo)).map(p=>`<option value="${esc(p.codigo)}">${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join("")}
+function und(prefix){const p=P[$("#"+prefix+"c").value];return(+$("#"+prefix+"cj").value||0)*(p?.und_caja||0)+(+$("#"+prefix+"s").value||0)}
+let cnt=0;const uid=()=>Date.now().toString(36)+(cnt++).toString(36)+Math.random().toString(36).slice(2,4);
+function persist(){try{localStorage.setItem(KEY,JSON.stringify({P,M,b:lastB}))}catch(e){alert("No se pudo guardar en el navegador")}}
+function save(coll,id,d){(coll==="productos"?P:M)[id]=d;persist();draw()}
+function del(coll,id,btn){if(btn.dataset.s!=="1"){btn.dataset.s="1";btn.textContent="¿Seguro?";return}delete(coll==="productos"?P:M)[id];persist();draw()}
+function warn(){const d=lastB?(Date.now()-new Date(lastB))/864e5:99;$("#warn").innerHTML=Object.keys(M).length&&d>7?'<div class="msg">⚠️ Descarga el PDF de movimientos: '+(lastB?"el último fue hace más de 7 días.":"aún no has descargado ninguno.")+'</div>':""}
+const delBtn=(c,id)=>`<button class="s" onclick="del('${c}','${esc(id)}',this)">✕</button>`;
+function table(h,rows){return`<div class="t"><table><tr>${h.map(x=>`<th>${x}</th>`).join("")}</tr>${rows.join("")||`<tr><td colspan="${h.length}" style="color:var(--mu)">Sin registros todavía</td></tr>`}</table></div>`}
+function draw(){nav();warn();if(!Object.keys(P).length&&tab!=="Productos"&&tab!=="Resumen"){$("#app").innerHTML=`<div class="card">Primero crea tus productos en la pestaña <b>Productos</b>.</div>`;return}
+ ({Resumen,Productos,Entradas:()=>mov("entrada"),Ventas:()=>mov("venta"),Salidas:()=>mov("salida"),Cuentas})[tab]()}
+function Resumen(){let vt=0,cv=0,inv=0,pedir=[];for(const m of Object.values(M))if(m.tipo==="venta"){vt+=m.und*m.valor;cv+=m.und*(P[m.codigo]?.costo||0)}
+ for(const p of Object.values(P)){const s=stock(p.codigo);inv+=s*p.costo;if(s<=p.minimo)pedir.push(p)}
+ const cob=Object.values(cuentas()).reduce((a,x)=>a+x.fiado-x.ab,0);
+ $("#app").innerHTML=`<div class="grid">${[["Ventas",$$(vt)],["Utilidad",$$(vt-cv)],["Valor inventario",$$(inv)],["Por cobrar",$$(cob)]].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>
+ <div class="card"><h2>Por pedir</h2>${pedir.length?pedir.map(p=>`<div>⚠️ <b>${esc(p.nombre)}</b> — quedan ${stock(p.codigo)} und. (mínimo ${p.minimo})</div>`).join(""):'<span class="okc">Todo el stock está por encima del mínimo ✓</span>'}</div>`}
+function Productos(){$("#app").innerHTML=`<div class="card"><h2>Nuevo producto</h2><div class="f">
+ <div><label>Código</label><input id="a"></div><div><label>Nombre</label><input id="b"></div><div><label>Und. por caja</label><input id="c" type="number" value="30"></div>
+ <div><label>Costo por und.</label><input id="d" type="number"></div><div><label>Precio por und.</label><input id="e" type="number"></div><div><label>Stock mínimo (und.)</label><input id="g" type="number" value="30"></div>
+ <button class="p" onclick="addP()">Guardar</button></div></div><div class="card">${table(["Código","Producto","Stock","Cajas","Costo","Precio","Margen","Estado",""],Object.values(P).sort((a,b)=>a.codigo.localeCompare(b.codigo)).map(p=>{const s=stock(p.codigo);return`<tr><td>${esc(p.codigo)}</td><td>${esc(p.nombre)}</td><td>${s}</td><td>${Math.floor(s/p.und_caja)}c + ${s%p.und_caja}</td><td>${$$(p.costo)}</td><td>${$$(p.precio)}</td><td>${p.precio?Math.round((p.precio-p.costo)/p.precio*100)+"%":"-"}</td><td class="${s<=p.minimo?"pedir":"okc"}">${s<0?"REVISAR":s<=p.minimo?"PEDIR":"OK"}</td><td>${delBtn("productos",p.codigo)}</td></tr>`}))}</div>`}
+function addP(){const c=$("#a").value.trim().toUpperCase();if(!c||!$("#b").value.trim())return alert("Escribe código y nombre");save("productos",c,{codigo:c,nombre:$("#b").value.trim(),und_caja:+$("#c").value||1,costo:+$("#d").value||0,precio:+$("#e").value||0,minimo:+$("#g").value||0})}
+function mov(t){const v=t==="venta",e=t==="entrada",titulo={entrada:"Nueva entrada (compra)",venta:"Nueva venta",salida:"Nueva salida (merma / ajuste)"}[t];
+ $("#app").innerHTML=`<div class="card"><h2>${titulo}</h2><div class="f"><div><label>Fecha</label><input id="mf" type="date" value="${hoy()}"></div>
+ <div><label>Producto</label><select id="mpc">${opts()}</select></div><div><label>Cajas</label><input id="mpcj" type="number" value="0"></div><div><label>Sueltas</label><input id="mps" type="number" value="0"></div>
+ ${v||e?`<div><label>${v?"Precio por und. (vacío = catálogo)":"Costo por und. (vacío = catálogo)"}</label><input id="mv" type="number"></div>`:`<div><label>Motivo</label><select id="mm"><option>Rotura</option><option>Regalo</option><option>Consumo propio</option><option>Vencida</option><option>Ajuste</option></select></div>`}
+ ${v?`<div><label>Cliente</label><input id="mcl" list="cl"><datalist id="cl">${Object.keys(cuentas()).map(c=>`<option value="${esc(c)}">`).join("")}</datalist></div><div><label>Pago</label><select id="mpg"><option>Efectivo</option><option>Transferencia</option><option>Fiado</option></select></div><div><label>Abono inicial (si es fiado)</label><input id="mab" type="number"></div>`:""}
+ <div><label>Nota</label><input id="mn"></div><button class="p" onclick="addM('${t}')">Guardar</button></div></div>
+ <div class="card">${table(["Fecha","Producto","Und.",v?"Total":e?"Costo total":"Motivo",...(v?["Cliente","Pago"]:[]),""],mv(t).map(m=>`<tr><td>${m.fecha}</td><td>${esc(P[m.codigo]?.nombre||m.codigo)}</td><td>${m.und}</td><td>${t==="salida"?esc(m.motivo):$$(m.und*m.valor)}</td>${v?`<td>${esc(m.cliente)}</td><td>${esc(m.pago)}</td>`:""}<td>${delBtn("movimientos",m.id)}</td></tr>`))}</div>`}
+function addM(t){const c=$("#mpc").value,p=P[c],n=und("mp");if(n<=0)return alert("Indica cuántas unidades");
+ const d={id:uid(),tipo:t,fecha:$("#mf").value||hoy(),codigo:c,und:n,nota:$("#mn").value};
+ if(t==="venta"){d.valor=+$("#mv").value||p.precio;d.cliente=$("#mcl").value.trim();d.pago=$("#mpg").value;d.abono=+$("#mab").value||0;if(d.pago==="Fiado"&&!d.cliente)return alert("Una venta fiada necesita nombre de cliente")}
+ else if(t==="entrada")d.valor=+$("#mv").value||p.costo;else{d.valor=0;d.motivo=$("#mm").value}
+ save("movimientos",d.id,d)}
+function Cuentas(){const c=cuentas();$("#app").innerHTML=`<div class="card"><h2>Cuentas por cobrar</h2>${table(["Cliente","Fiado","Abonado","Saldo","Registrar abono"],Object.entries(c).map(([k,x],i)=>`<tr><td>${esc(k)}</td><td>${$$(x.fiado)}</td><td>${$$(x.ab)}</td><td class="${x.fiado-x.ab>0?"pedir":"okc"}">${$$(x.fiado-x.ab)}</td><td><input id="ab${i}" type="number" style="width:90px"> <button class="s" onclick="abonar('${esc(k).replace(/'/g,"\\'")}',${i})">Abonar</button></td></tr>`))}</div>`}
+function abonar(cl,i){const v=+$("#ab"+i).value;if(v<=0)return;{const id=uid();save("movimientos",id,{id,tipo:"abono",fecha:hoy(),cliente:cl,valor:v})}}
+$("#exp").onclick=()=>{const all=Object.values(M).sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||"")||a.id.localeCompare(b.id));
+ if(!all.length)return alert("Aún no hay movimientos para descargar");
+ const T={entrada:"Entrada",venta:"Venta",salida:"Salida",abono:"Abono"},tot=m=>m.tipo==="abono"?m.valor:m.und*m.valor;
+ const rows=all.map(m=>[m.fecha,T[m.tipo],m.codigo?(P[m.codigo]?.nombre||m.codigo):"",m.cliente||"",m.tipo==="abono"?"":m.und,m.tipo==="venta"||m.tipo==="entrada"?$$(m.valor):"",m.tipo==="salida"?"":$$(tot(m)),
+  m.tipo==="venta"?m.pago+(m.pago==="Fiado"&&m.abono?" (abono "+$$(m.abono)+")":""):m.tipo==="salida"?m.motivo:"",m.nota||""]);
+ const doc=new window.jspdf.jsPDF({orientation:"landscape"});
+ doc.setFontSize(14);doc.text("Movimientos - Inventario de cervezas",14,14);doc.setFontSize(9);doc.text("Generado el "+hoy()+" - "+all.length+" movimientos",14,20);
+ doc.autoTable({startY:24,head:[["Fecha","Tipo","Producto","Cliente","Und.","Valor und.","Total","Pago / Motivo","Nota"]],body:rows,styles:{fontSize:8},headStyles:{fillColor:[91,58,26]}});
+ const sum=t=>all.filter(m=>m.tipo===t).reduce((a,m)=>a+tot(m),0),cob=Object.values(cuentas()).reduce((a,x)=>a+x.fiado-x.ab,0);
+ doc.setFontSize(10);doc.text("Total ventas: "+$$(sum("venta"))+"   Total compras: "+$$(sum("entrada"))+"   Por cobrar: "+$$(cob),14,doc.lastAutoTable.finalY+8);
+ doc.save("movimientos_cervezas_"+hoy()+".pdf");lastB=hoy();persist();warn()};
+try{const d=JSON.parse(localStorage.getItem(KEY)||"{}");P=d.P||{};M=d.M||{};lastB=d.b||""}catch(e){}
+navigator.storage?.persist?.();draw();
+</script></body></html>
